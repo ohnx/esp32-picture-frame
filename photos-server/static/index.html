@@ -1,0 +1,697 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Photo Library</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <style>
+    :root {
+      --crop-border: rgba(0,0,0,0.45);
+    }
+    body {
+      font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial;
+      margin: 20px;
+      max-width: 1200px;
+    }
+    h1 {
+      margin-bottom: 8px;
+    }
+
+    /* Gallery */
+    #gallery {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+      gap: 12px;
+      margin-bottom: 18px;
+    }
+    .thumb { position: relative; }
+    .thumb img {
+      width: 100%;
+      height: auto;
+      display: block;
+      border-radius: 8px;
+      cursor: pointer;
+      user-select: none;
+    }
+    .delete-btn {
+      position: absolute;
+      top: 6px;
+      right: 6px;
+      background: rgba(0,0,0,0.6);
+      color: white;
+      border: none;
+      padding: 4px 8px;
+      cursor: pointer;
+      border-radius: 6px;
+      font-size: 12px;
+    }
+
+    /* Uploader */
+    #uploader { margin-bottom: 18px; display:flex; gap:12px; align-items:center; flex-wrap:wrap;}
+    #fileInput { display: none; }
+    #dropzone {
+      padding: 18px;
+      border: 2px dashed #aaa;
+      border-radius: 8px;
+      text-align: center;
+      color: #666;
+      min-width: 240px;
+      cursor: pointer;
+    }
+    #dropzone.dragover { border-color: #333; background: #fafafa; }
+
+    /* Cropper modal */
+    .modal-backdrop {
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.5);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      z-index: 1000;
+    }
+    .modal {
+      background: white;
+      border-radius: 10px;
+      padding: 14px;
+      max-width: calc(100% - 40px);
+      box-shadow: 0 10px 30px rgba(0,0,0,0.35);
+    }
+    .crop-area {
+      position: relative;
+      overflow: hidden;
+      touch-action: none;
+      background: #222;
+      margin-bottom: 8px;
+      border-radius: 6px;
+    }
+    .crop-image {
+      position: absolute;
+      top: 0;
+      left: 0;
+      transform-origin: 0 0;
+      will-change: transform;
+      user-select: none;
+      -webkit-user-drag: none;
+      pointer-events: all;
+      cursor: grab;
+    }
+    .crop-controls {
+      display:flex;
+      gap:8px;
+      align-items:center;
+    }
+    .btn {
+      padding: 8px 12px;
+      border-radius: 8px;
+      border: 1px solid #ddd;
+      background: #f7f7f7;
+      cursor: pointer;
+    }
+    .btn.primary {
+      background: #1967d2;
+      color: white;
+      border-color: #1258b3;
+    }
+
+    /* Crop overlay edges for clarity */
+    .crop-outline {
+      position: absolute;
+      inset: 0;
+      border: 2px dashed var(--crop-border);
+      pointer-events: none;
+      border-radius: 6px;
+      box-sizing: border-box;
+    }
+
+    /* Helpful small text */
+    .small { font-size: 13px; color: #444; }
+    @media (max-width: 640px) {
+      #gallery { grid-template-columns: repeat(2, 1fr); }
+    }
+  </style>
+</head>
+<body>
+  <h1>Photo Library</h1>
+
+  <div id="gallery"></div>
+
+  <div id="uploader">
+    <!--<label class="small">Select images:</label>-->
+    <input type="file" id="fileInput" accept="image/*" multiple />
+    <div id="dropzone">Drag & Drop photos to upload (or click to select)</div>
+  </div>
+
+  <!-- Cropper modal (hidden until needed) -->
+  <div id="cropModal" class="modal-backdrop" aria-hidden="true">
+    <div class="modal" role="dialog" aria-modal="true" aria-label="Crop image">
+      <div id="cropContainer">
+        <!-- crop area will be sized dynamically -->
+        <div id="cropArea" class="crop-area">
+          <img id="cropImage" class="crop-image" draggable="false" alt="to crop" />
+          <div class="crop-outline"></div>
+        </div>
+      </div>
+
+      <div class="crop-controls" style="margin-top:8px;">
+        <label class="small">Zoom</label>
+        <input id="zoomSlider" type="range" min="0.5" max="3" step="0.01" value="1" style="flex:1" />
+        <button id="skipBtn" class="btn">Skip</button>
+        <button id="cropUploadBtn" class="btn primary">Crop & Upload</button>
+      </div>
+      <div style="margin-top:8px; display:flex; justify-content:space-between; align-items:center;">
+        <div class="small">Crop size: <strong>800 × 480</strong> (5:3)</div>
+        <div class="small">Drag image to reposition</div>
+      </div>
+    </div>
+  </div>
+
+<script>
+/* ----------------------------
+  Palette & filename helper
+   ----------------------------*/
+const PALETTE = [
+  { r: 0,   g: 0,   b: 0   }, // black
+  { r: 255, g: 255, b: 255 }, // white
+  { r: 0,   g: 255, b: 0   }, // green
+  { r: 0,   g: 0,   b: 255 }, // blue
+  { r: 255, g: 0,   b: 0   }, // red
+  { r: 255, g: 255, b: 0   }, // yellow
+  { r: 255, g: 128, b: 0   }  // orange
+];
+
+/* ----------------------------
+  Utility & basic gallery
+   ----------------------------*/
+const CROP_W = 800;
+const CROP_H = 480;
+const CROP_ASPECT = CROP_W / CROP_H;
+
+const gallery = document.getElementById('gallery');
+const dropzone = document.getElementById('dropzone');
+const fileInput = document.getElementById('fileInput');
+
+async function loadGallery() {
+  try {
+    const res = await fetch('/list');
+    const files = await res.json();
+    gallery.innerHTML = '';
+    files.forEach(file => {
+      const div = document.createElement('div');
+      div.className = 'thumb';
+      const img = document.createElement('img');
+      img.src = '/photo/' + encodeURIComponent(file);
+      img.alt = file;
+      img.onclick = () => window.open(img.src, '_blank');
+
+      const btn = document.createElement('button');
+      btn.className = 'delete-btn';
+      btn.textContent = 'X';
+      btn.onclick = async (e) => {
+        e.stopPropagation();
+        if (!confirm(`Delete ${file}?`)) return;
+        await fetch('/delete/' + encodeURIComponent(file), { method: 'DELETE' });
+        loadGallery();
+      };
+
+      div.appendChild(img);
+      div.appendChild(btn);
+      gallery.appendChild(div);
+    });
+  } catch (err) {
+    console.error('Failed to load gallery', err);
+  }
+}
+
+/* ----------------------------
+  Floyd-Steinberg dithering
+   ----------------------------*/
+function floydSteinbergDither(imageData, palette) {
+  const { data, width, height } = imageData;
+  // Work in a float buffer so errors accumulate precisely
+  const buf = new Float32Array(data.length);
+  for (let i = 0; i < data.length; ++i) buf[i] = data[i];
+
+  // helper: find nearest palette color (Euclidean)
+  function nearestColorIndex(r, g, b) {
+    let best = 0;
+    let bestDist = Infinity;
+    for (let i = 0; i < palette.length; ++i) {
+      const p = palette[i];
+      const dr = r - p.r, dg = g - p.g, db = b - p.b;
+      const d = dr*dr + dg*dg + db*db;
+      if (d < bestDist) { bestDist = d; best = i; }
+    }
+    return best;
+  }
+
+  // iterate top-to-bottom, left-to-right
+  for (let y = 0; y < height; ++y) {
+    for (let x = 0; x < width; ++x) {
+      const idx = (y * width + x) * 4;
+      const oldR = buf[idx + 0];
+      const oldG = buf[idx + 1];
+      const oldB = buf[idx + 2];
+
+      const pi = nearestColorIndex(oldR, oldG, oldB);
+      const pcol = palette[pi];
+
+      // set output pixel immediately in data array (integers 0..255)
+      data[idx + 0] = pcol.r;
+      data[idx + 1] = pcol.g;
+      data[idx + 2] = pcol.b;
+      data[idx + 3] = 255;
+
+      // compute quantization error
+      const errR = oldR - pcol.r;
+      const errG = oldG - pcol.g;
+      const errB = oldB - pcol.b;
+
+      // distribute error to neighbors using Floyd–Steinberg weights
+      // right: x+1, y      -> 7/16
+      if (x + 1 < width) {
+        const i = (y * width + (x + 1)) * 4;
+        buf[i + 0] += errR * (7/16);
+        buf[i + 1] += errG * (7/16);
+        buf[i + 2] += errB * (7/16);
+      }
+      // bottom-left: x-1, y+1 -> 3/16
+      if (x - 1 >= 0 && y + 1 < height) {
+        const i = ((y + 1) * width + (x - 1)) * 4;
+        buf[i + 0] += errR * (3/16);
+        buf[i + 1] += errG * (3/16);
+        buf[i + 2] += errB * (3/16);
+      }
+      // bottom: x, y+1 -> 5/16
+      if (y + 1 < height) {
+        const i = ((y + 1) * width + x) * 4;
+        buf[i + 0] += errR * (5/16);
+        buf[i + 1] += errG * (5/16);
+        buf[i + 2] += errB * (5/16);
+      }
+      // bottom-right: x+1, y+1 -> 1/16
+      if (x + 1 < width && y + 1 < height) {
+        const i = ((y + 1) * width + (x + 1)) * 4;
+        buf[i + 0] += errR * (1/16);
+        buf[i + 1] += errG * (1/16);
+        buf[i + 2] += errB * (1/16);
+      }
+    }
+  }
+}
+
+/* ----------------------------
+  Random filename generator
+   ----------------------------*/
+function randomFilename(originalName) {
+  // preserve extension if present
+  const i = originalName.lastIndexOf('.');
+  // timestamp + 14-char random
+  const t = Date.now().toString(36);
+  const r = Math.random().toString(36).slice(2, 16);
+  return `${t}-${r}.png`;
+}
+
+/* ----------------------------
+  Upload helper
+   ----------------------------*/
+async function uploadBlob(blob, filename) {
+  const form = new FormData();
+  form.append('file', blob, filename);
+  const res = await fetch('/upload', { method: 'POST', body: form });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error('Upload failed: ' + (text || res.status));
+  }
+  return await res.json();
+}
+
+/* ----------------------------
+  Drop & file input handling
+   ----------------------------*/
+dropzone.addEventListener('click', () => fileInput.click());
+
+dropzone.addEventListener('dragover', e => {
+  e.preventDefault();
+  dropzone.classList.add('dragover');
+});
+dropzone.addEventListener('dragleave', e => {
+  e.preventDefault();
+  dropzone.classList.remove('dragover');
+});
+dropzone.addEventListener('drop', async e => {
+  e.preventDefault();
+  dropzone.classList.remove('dragover');
+  const files = Array.from(e.dataTransfer.files || []);
+  await processFilesQueue(files);
+});
+
+fileInput.addEventListener('change', async e => {
+  const files = Array.from(e.target.files || []);
+  fileInput.value = '';
+  await processFilesQueue(files);
+});
+
+/* ----------------------------
+  Cropping UI / logic
+   ----------------------------*/
+const cropModal = document.getElementById('cropModal');
+const cropArea = document.getElementById('cropArea');
+const cropImage = document.getElementById('cropImage');
+const zoomSlider = document.getElementById('zoomSlider');
+const cropUploadBtn = document.getElementById('cropUploadBtn');
+const skipBtn = document.getElementById('skipBtn');
+
+let currentImg = null;      // HTMLImageElement
+let state = null;           // { imgNaturalW, imgNaturalH, scale, offsetX, offsetY, displayW, displayH }
+let dragState = null;       // used for pointer dragging
+let resolveCropPromise = null;
+
+// show modal and return a promise resolved with a blob or null if skipped
+function openCropperForFile(file) {
+  return new Promise((resolve, reject) => {
+    resolveCropPromise = resolve;
+    const url = URL.createObjectURL(file);
+    cropImage.src = url;
+    cropImage.onload = () => {
+      currentImg = cropImage;
+      setupCropperDimensions(currentImg.naturalWidth, currentImg.naturalHeight);
+      cropModal.style.display = 'flex';
+      cropModal.setAttribute('aria-hidden', 'false');
+      // reset zoom
+      zoomSlider.value = state ? state.scale : 1;
+    };
+    cropImage.onerror = (err) => {
+      URL.revokeObjectURL(url);
+      resolve(null);
+    };
+  });
+}
+
+function closeCropper() {
+  cropModal.style.display = 'none';
+  cropModal.setAttribute('aria-hidden', 'true');
+  if (currentImg && currentImg.src) {
+    URL.revokeObjectURL(currentImg.src);
+  }
+  currentImg = null;
+  state = null;
+  dragState = null;
+  resolveCropPromise = null;
+}
+
+/* size the UI crop box responsively and initialize state */
+function setupCropperDimensions(imgNaturalW, imgNaturalH) {
+  // decide UI crop size: limit to 800 width but fit smaller screens
+  const maxWidth = Math.min(800, window.innerWidth - 60);
+  const uiW = Math.max(220, maxWidth);
+  const uiH = Math.round(uiW / CROP_ASPECT);
+
+  cropArea.style.width = uiW + 'px';
+  cropArea.style.height = uiH + 'px';
+
+  // initial scale so image covers crop area (cover)
+  const coverScale = Math.max(uiW / imgNaturalW, uiH / imgNaturalH);
+  const displayW = Math.round(imgNaturalW * coverScale);
+  const displayH = Math.round(imgNaturalH * coverScale);
+  // center image within crop area
+  const offsetX = Math.round((uiW - displayW) / 2);
+  const offsetY = Math.round((uiH - displayH) / 2);
+
+  state = {
+    imgNaturalW: imgNaturalW,
+    imgNaturalH: imgNaturalH,
+    uiW, uiH,
+    scale: coverScale,
+    minScale: coverScale,
+    offsetX, offsetY,
+    displayW, displayH
+  };
+
+  // configure zoom slider based on minScale so user can't zoom out past cover
+  const minVal = Number(state.minScale.toFixed(4));
+  const maxVal = Math.max(minVal * 3, minVal + 0.1);
+  zoomSlider.min = minVal;
+  zoomSlider.max = maxVal;
+  zoomSlider.step = 0.01;
+  zoomSlider.value = state.scale;
+
+  applyTransform();
+}
+
+/* apply CSS transform to image to reflect state */
+function applyTransform() {
+  if (!state || !currentImg) return;
+  const { scale, offsetX, offsetY, displayW, displayH } = state;
+  // set image size to displayW/displayH using transform scale relative to natural size
+  // We'll set the CSS width/height equal to displayW/displayH
+  currentImg.style.width = displayW + 'px';
+  currentImg.style.height = displayH + 'px';
+  currentImg.style.transform = `translate(${offsetX}px, ${offsetY}px)`;
+}
+
+/* pointer dragging to move image under crop box */
+cropArea.addEventListener('pointerdown', (ev) => {
+  if (!state) return;
+  ev.preventDefault();
+  cropArea.setPointerCapture(ev.pointerId);
+  dragState = { startX: ev.clientX, startY: ev.clientY, origOffsetX: state.offsetX, origOffsetY: state.offsetY };
+  currentImg.style.cursor = 'grabbing';
+});
+cropArea.addEventListener('pointermove', (ev) => {
+  if (!dragState || !state) return;
+  ev.preventDefault();
+  const dx = ev.clientX - dragState.startX;
+  const dy = ev.clientY - dragState.startY;
+  state.offsetX = dragState.origOffsetX + dx;
+  state.offsetY = dragState.origOffsetY + dy;
+  clampOffsets();
+  applyTransform();
+});
+cropArea.addEventListener('pointerup', (ev) => {
+  if (!dragState) return;
+  cropArea.releasePointerCapture(ev.pointerId);
+  dragState = null;
+  if (currentImg) currentImg.style.cursor = 'grab';
+});
+cropArea.addEventListener('pointercancel', () => { dragState = null; if (currentImg) currentImg.style.cursor = 'grab'; });
+
+/* Zoom slider handling */
+zoomSlider.addEventListener('input', (e) => {
+  if (!state) return;
+  let newScale = parseFloat(e.target.value);
+  // defensive clamp
+  if (isNaN(newScale) || newScale < state.minScale) newScale = state.minScale;
+
+  // compute center anchor in UI coordinates (keep crop center stable)
+  const centerX = state.uiW / 2;
+  const centerY = state.uiH / 2;
+
+  // current displayed size & offsets
+  const oldDisplayW = state.displayW;
+  const oldDisplayH = state.displayH;
+
+  // coordinates in image space representing center
+  const relCenterX = (centerX - state.offsetX) / oldDisplayW; // [0..1]
+  const relCenterY = (centerY - state.offsetY) / oldDisplayH;
+
+  // compute new display size
+  const newDisplayW = Math.round(state.imgNaturalW * newScale);
+  const newDisplayH = Math.round(state.imgNaturalH * newScale);
+
+  // compute new offsets so that center remains same relative point
+  const newOffsetX = Math.round(centerX - relCenterX * newDisplayW);
+  const newOffsetY = Math.round(centerY - relCenterY * newDisplayH);
+
+  state.scale = newScale;
+  state.displayW = newDisplayW;
+  state.displayH = newDisplayH;
+  state.offsetX = newOffsetX;
+  state.offsetY = newOffsetY;
+
+  // clamp offsets to ensure no gap (image must cover crop box)
+  clampOffsets();
+  applyTransform();
+
+  // keep slider value exactly in sync (in case we clamped it)
+  zoomSlider.value = state.scale;
+});
+
+/* ensure image always covers crop area (no whitespace) */
+function clampOffsets() {
+  if (!state) return;
+  const minOffsetX = Math.min(0, state.uiW - state.displayW);
+  const maxOffsetX = 0;
+  const minOffsetY = Math.min(0, state.uiH - state.displayH);
+  const maxOffsetY = 0;
+  state.offsetX = Math.max(minOffsetX, Math.min(maxOffsetX, state.offsetX));
+  state.offsetY = Math.max(minOffsetY, Math.min(maxOffsetY, state.offsetY));
+}
+
+/* Crop to 800x480 using canvas based on current state */
+function cropCurrentToBlob(quality = 0.92) {
+  return new Promise((resolve) => {
+    if (!state || !currentImg) return resolve(null);
+    const imgEl = currentImg;
+
+    const sx = Math.round(( -state.offsetX ) * (state.imgNaturalW / state.displayW));
+    const sy = Math.round(( -state.offsetY ) * (state.imgNaturalH / state.displayH));
+    const sW = Math.round((state.uiW) * (state.imgNaturalW / state.displayW));
+    const sH = Math.round((state.uiH) * (state.imgNaturalH / state.displayH));
+
+    // create canvas of target size
+    const canvas = document.createElement('canvas');
+    canvas.width = CROP_W;
+    canvas.height = CROP_H;
+    const ctx = canvas.getContext('2d');
+
+    // draw the selected portion from the natural image onto canvas and scale to CROP_W x CROP_H
+    ctx.drawImage(imgEl, sx, sy, sW, sH, 0, 0, CROP_W, CROP_H);
+
+    // get pixels, dither to palette, then write back and export as PNG
+    try {
+      const imageData = ctx.getImageData(0, 0, CROP_W, CROP_H);
+      floydSteinbergDither(imageData, PALETTE);
+      ctx.putImageData(imageData, 0, 0);
+    } catch (err) {
+      // if getImageData is blocked (cross-origin), fallback to upload the non-dithered crop
+      console.warn('Dither failed (maybe cross-origin); uploading raw crop', err);
+    }
+
+    canvas.toBlob((blob) => {
+      resolve(blob);
+    }, 'image/png'); // use PNG to preserve exact palette colors
+  });
+}
+
+/* Buttons in modal */
+cropUploadBtn.addEventListener('click', async () => {
+  cropUploadBtn.disabled = true;
+  skipBtn.disabled = true;
+  try {
+    const blob = await cropCurrentToBlob(0.9);
+    if (blob) {
+      const filename = randomFilename((currentImg && currentImg.src) ? 'img.jpg' : 'img.jpg');
+      // blob is raw JPEG; upload it
+      await uploadBlob(blob, filename);
+    }
+    // resolve as uploaded
+    if (resolveCropPromise) resolveCropPromise(true);
+  } catch (err) {
+    console.error('Upload/crop failed', err);
+    alert('Upload failed: ' + err.message);
+    if (resolveCropPromise) resolveCropPromise(false);
+  } finally {
+    cropUploadBtn.disabled = false;
+    skipBtn.disabled = false;
+    closeCropper();
+    loadGallery();
+  }
+});
+
+skipBtn.addEventListener('click', () => {
+  if (resolveCropPromise) resolveCropPromise(false);
+  closeCropper();
+});
+
+/* when modal backdrop clicked outside modal, treat as skip */
+cropModal.addEventListener('click', (e) => {
+  if (e.target === cropModal) {
+    if (resolveCropPromise) resolveCropPromise(false);
+    closeCropper();
+  }
+});
+
+/* ----------------------------
+  File processing queue
+   ----------------------------*/
+async function processFilesQueue(files) {
+  // keep only images
+  const images = files.filter(f => f.type && f.type.startsWith('image/'));
+  for (const file of images) {
+    // show cropper for each and wait for result (true => uploaded, false => skipped)
+    const uploaded = await openCropperForFile(file)
+      .then(() => {
+        // wait for user interaction - the promise will be resolved by cropUpload or skip
+        return new Promise((res) => {
+          // hook resolve via resolveCropPromise being set when openCropperForFile was called
+          const check = () => {
+            if (resolveCropPromise === null) {
+              // maybe already resolved; but we handle differently - rather use global promise resolution
+            }
+          };
+          // nothing needed here - openCropperForFile returned a promise that will resolve when user acts.
+        });
+      }).catch(() => false);
+
+    // The above approach isn't directly returning the final boolean because openCropperForFile is resolved only internally.
+    // Simpler: openCropperForFile actually returns a promise that we resolve when user clicks; adjust pattern:
+    // To simplify, rewrite process using a helper that awaits the crop dialog promise directly.
+  }
+}
+
+/* The above processFilesQueue had an awkward pattern - replace with a clearer helper that
+   uses openCropperForFilePromise which returns when user finishes. */
+
+function openCropperPromise(file) {
+  return new Promise((resolve) => {
+    // set up resolver for this file
+    const url = URL.createObjectURL(file);
+    cropImage.src = url;
+    cropImage.onload = () => {
+      currentImg = cropImage;
+      setupCropperDimensions(currentImg.naturalWidth, currentImg.naturalHeight);
+      cropModal.style.display = 'flex';
+      cropModal.setAttribute('aria-hidden', 'false');
+      zoomSlider.value = state.scale;
+    };
+    cropImage.onerror = () => {
+      URL.revokeObjectURL(url);
+      resolve({ uploaded: false, error: true });
+    };
+
+    // temporarily override modal promise resolver to capture this file's outcome
+    const originalResolve = resolveCropPromise;
+    const captureResolver = (result) => {
+      // result === true if uploaded, false if skipped or error
+      // clear modal and revoke objectURL
+      closeCropper();
+      resolve({ uploaded: result === true, error: false });
+      // restore (not used)
+      resolveCropPromise = originalResolve;
+    };
+    resolveCropPromise = captureResolver;
+  });
+}
+
+async function processFilesQueue(files) {
+  const images = files.filter(f => f.type && f.type.startsWith('image/'));
+  for (const file of images) {
+    try {
+      const outcome = await openCropperPromise(file);
+      // if user uploaded (outcome.uploaded === true) then we already uploaded inside cropUploadBtn handler
+      // If user skipped, optionally you could upload original; here we skip uploading if skipped.
+      // If you'd like to upload original when skipped, uncomment the block below:
+      /*
+      if (!outcome.uploaded) {
+        // upload original file (optionally rename)
+        const filename = randomFilename(file.name || 'upload.jpg');
+        await uploadBlob(file, filename);
+      }
+      */
+    } catch (err) {
+      console.error('Processing file failed', err);
+    }
+  }
+  // refresh gallery after processing queue
+  await loadGallery();
+}
+
+/* ----------------------------
+  Init
+   ----------------------------*/
+loadGallery();
+
+</script>
+</body>
+</html>

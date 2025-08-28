@@ -12,7 +12,7 @@
 __attribute__((noreturn)) void powernap_for_hours(uint64_t time_hr) {
 #define US_PER_SECOND       1000000
 #define SECONDS_PER_HOUR    3600
-//    esp_deep_sleep(time_hr * SECONDS_PER_HOUR * US_PER_SECOND);
+    esp_deep_sleep(time_hr * SECONDS_PER_HOUR * US_PER_SECOND);
     Serial.println("would have power napped here, but am not going to.");
     while(1) { delay(100); }
 #undef US_PER_SECOND

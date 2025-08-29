@@ -14,13 +14,12 @@ this is mostly written by chatgpt.
 
 ## esp32-picture-frame
 
-code running on the esp32. most of it is copied from waveshare's guide
-
-TODO: make it work on the whole image. right now due to ram constraints i only
-make it work on part of it. rip. it shouldn't be hard to stream, but also it's
-late and i should sleep
+code running on the esp32. most of it is copied from waveshare's guide.
 
 ## what's next?
 
-Well there is now e-ink Spectra 6 displays (e.g. [this one](https://www.waveshare.com/13.3inch-e-paper-hat-plus-e.htm))
-and so of course I want to try it out.
+i'm thinking about a PCB design right now.
+
+Also there is now e-ink Spectra 6 displays (e.g. [this one](https://www.waveshare.com/13.3inch-e-paper-hat-plus-e.htm))
+and so of course I want to try it out. Unfortunately the driver PCB is different (60-pin FPC instead of 50-pin)
+so I'd probably have to redesign some stuff :(

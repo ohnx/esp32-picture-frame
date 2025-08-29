@@ -50,7 +50,7 @@ function :  send command
 parameter:
      Reg : Command register
 ******************************************************************************/
-static void EPD_7IN3F_SendCommand(UBYTE Reg)
+void EPD_7IN3F_SendCommand(UBYTE Reg)
 {
     DEV_Digital_Write(EPD_DC_PIN, 0);
     DEV_Digital_Write(EPD_CS_PIN, 0);
@@ -63,7 +63,7 @@ function :  send data
 parameter:
     Data : Write data
 ******************************************************************************/
-static void EPD_7IN3F_SendData(UBYTE Data)
+void EPD_7IN3F_SendData(UBYTE Data)
 {
     DEV_Digital_Write(EPD_DC_PIN, 1);
     DEV_Digital_Write(EPD_CS_PIN, 0);
@@ -88,7 +88,7 @@ static void EPD_7IN3F_ReadBusyH(void)
 function :  Turn On Display
 parameter:
 ******************************************************************************/
-static void EPD_7IN3F_TurnOnDisplay(void)
+void EPD_7IN3F_TurnOnDisplay(void)
 {
     EPD_7IN3F_SendCommand(0x04); // POWER_ON
     EPD_7IN3F_ReadBusyH();

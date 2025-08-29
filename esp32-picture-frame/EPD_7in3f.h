@@ -56,4 +56,9 @@ void EPD_7IN3F_Display(const UBYTE *Image);
 void EPD_7IN3F_DisplayPart(UBYTE *Image, UWORD xstart, UWORD ystart, UWORD image_width, UWORD image_heigh);
 void EPD_7IN3F_Sleep(void);
 
+// ohnx: misc internal-y functions i expose
+void EPD_7IN3F_TurnOnDisplay(void);
+void EPD_7IN3F_SendData(UBYTE Data);
+void EPD_7IN3F_SendCommand(UBYTE Reg);
+
 #endif
